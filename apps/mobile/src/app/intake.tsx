@@ -5,6 +5,7 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput,
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useSession } from "@/auth/auth-provider";
+import { HardwareScanner } from "@/components/hardware-scanner";
 import { Input, Label, MoneyInput, Notice, parseKes, PrimaryButton, ScreenHeader, Segmented } from "@/components/ui";
 import { findByBarcode, listSuppliers, searchProducts, type Product, type Supplier, type Unit } from "@/db/catalog-repo";
 import { useDatabase } from "@/db/database-provider";
@@ -146,6 +147,8 @@ export default function IntakeScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white dark:bg-neutral-950">
       <ScreenHeader title="Receive stock" />
+      {/* Paused while a crate is being confirmed, so a second scan can't replace it. */}
+      <HardwareScanner onScan={(code) => void handleBarcode(code)} enabled={pending === null} />
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1">
         <ScrollView contentContainerClassName="gap-4 px-4 pb-10" keyboardShouldPersistTaps="handled">
           <View className="gap-2">

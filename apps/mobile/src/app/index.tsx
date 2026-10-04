@@ -5,6 +5,7 @@ import { FlatList, Pressable, ScrollView, Text, TextInput, View } from "react-na
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useSession } from "@/auth/auth-provider";
+import { HardwareScanner } from "@/components/hardware-scanner";
 import { ProductRow } from "@/components/product-row";
 import { SyncBadge } from "@/components/sync-badge";
 import {
@@ -69,7 +70,17 @@ export default function PosScreen() {
     [add, showFlash],
   );
 
-  /** Enter in the search box: an exact barcode adds the item (also how keyboard-wedge scanners work). */
+  /** A code from a Bluetooth/USB scanner (captured by <HardwareScanner>). */
+  const scanCode = useCallback(
+    async (code: string) => {
+      const match = await findByBarcode(db, code);
+      if (match) addToCart(match.product, match.unit);
+      else showFlash(`No product with barcode ${code}`, true);
+    },
+    [db, addToCart, showFlash],
+  );
+
+  /** Enter in the search box: an exact barcode adds the item, a single search result is added too. */
   const submitSearch = useCallback(async () => {
     const term = query.trim();
     if (!term) return;
@@ -100,6 +111,7 @@ export default function PosScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-white dark:bg-neutral-950" edges={["top", "left", "right"]}>
+      <HardwareScanner onScan={(code) => void scanCode(code)} />
       <View className="flex-row items-center gap-2 px-4 pb-2 pt-1">
         <Text className="flex-1 text-xl font-bold text-neutral-900 dark:text-white" numberOfLines={1}>
           Hi, {firstName}
