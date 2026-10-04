@@ -1,5 +1,4 @@
 import { formatKes } from "@liquor-pos/shared";
-import { router } from "expo-router";
 import { useEffect, useState } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -7,6 +6,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Input, Label, MoneyInput, Notice, parseKes, PrimaryButton, ScreenHeader } from "@/components/ui";
 import { useDatabase } from "@/db/database-provider";
 import { CASH_KIND_LABEL, summarizeShift, type ShiftSummary } from "@/db/shift-repo";
+import { goBack } from "@/lib/navigation";
 import { useShift } from "@/pos/shift-provider";
 import { useSync } from "@/sync/sync-provider";
 
@@ -69,7 +69,7 @@ export default function ShiftScreen() {
           <Text className="text-center text-sm text-neutral-500">The owner sees this on the dashboard once it uploads.</Text>
         </View>
         <View className="px-6 pb-8">
-          <PrimaryButton title="Done" onPress={() => router.back()} />
+          <PrimaryButton title="Done" onPress={() => goBack()} />
         </View>
       </SafeAreaView>
     );
@@ -96,7 +96,8 @@ export default function ShiftScreen() {
                 onPress={() =>
                   void run(async () => {
                     await open(value);
-                    router.back();
+                    setAmount("");
+                    goBack();
                   })
                 }
               />

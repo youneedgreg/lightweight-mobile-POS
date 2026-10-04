@@ -1,5 +1,4 @@
 import { formatKes, type PaymentMethod } from "@liquor-pos/shared";
-import { router } from "expo-router";
 import { useEffect, useState } from "react";
 import { FlatList, Pressable, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -7,6 +6,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useSession } from "@/auth/auth-provider";
 import { useDatabase } from "@/db/database-provider";
 import { listRecentSales, type LocalSale, type SaleSyncStatus } from "@/db/sales-repo";
+import { goBack } from "@/lib/navigation";
 import { discardRejected, listRejected, type RejectedItem } from "@/sync/sync-engine";
 import { useSync } from "@/sync/sync-provider";
 
@@ -44,7 +44,7 @@ export default function SalesScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white dark:bg-neutral-950">
       <View className="flex-row items-center px-4 pb-2 pt-1">
-        <Pressable onPress={() => router.back()} accessibilityRole="button" className="py-2 pr-4">
+        <Pressable onPress={() => goBack()} accessibilityRole="button" className="py-2 pr-4">
           <Text className="text-base text-neutral-600 dark:text-neutral-400">‹ Back</Text>
         </Pressable>
         <Text className="flex-1 text-center text-lg font-semibold text-neutral-900 dark:text-white">Sales & sync</Text>

@@ -1,11 +1,12 @@
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from "expo-camera";
-import { router, useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { findByBarcode } from "@/db/catalog-repo";
 import { useDatabase } from "@/db/database-provider";
+import { goBack } from "@/lib/navigation";
 import { useCart } from "@/pos/cart-provider";
 import { emitScan } from "@/pos/scan-bus";
 
@@ -35,7 +36,7 @@ export default function ScanScreen() {
       last.current = { code: data, at: now };
       busy.current = true;
       if (toIntake) {
-        if (emitScan(data)) router.back();
+        if (emitScan(data)) goBack();
         busy.current = false;
         return;
       }
@@ -65,7 +66,7 @@ export default function ScanScreen() {
         <Pressable onPress={() => void requestPermission()} accessibilityRole="button" className="rounded-xl bg-neutral-900 px-6 py-3 dark:bg-white">
           <Text className="text-base font-semibold text-white dark:text-neutral-900">Allow camera</Text>
         </Pressable>
-        <Pressable onPress={() => router.back()} accessibilityRole="button">
+        <Pressable onPress={() => goBack()} accessibilityRole="button">
           <Text className="text-base text-neutral-500">Cancel</Text>
         </Pressable>
       </SafeAreaView>
@@ -95,7 +96,7 @@ export default function ScanScreen() {
               <Text className="text-center text-base font-medium text-white">{message.text}</Text>
             </View>
           )}
-          <Pressable onPress={() => router.back()} accessibilityRole="button" className="h-14 items-center justify-center rounded-2xl bg-white">
+          <Pressable onPress={() => goBack()} accessibilityRole="button" className="h-14 items-center justify-center rounded-2xl bg-white">
             <Text className="text-lg font-semibold text-neutral-900">{toIntake ? "Cancel" : `Done · ${items} in cart`}</Text>
           </Pressable>
         </View>

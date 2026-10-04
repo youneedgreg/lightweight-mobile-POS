@@ -1,6 +1,7 @@
-import { router } from "expo-router";
 import type { ComponentPropsWithRef, ReactNode } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
+
+import { goBack } from "@/lib/navigation";
 
 type TextInputProps = ComponentPropsWithRef<typeof TextInput>;
 
@@ -11,7 +12,7 @@ export const inputClass =
 export function ScreenHeader({ title, right }: { title: string; right?: ReactNode }) {
   return (
     <View className="flex-row items-center px-4 pb-2 pt-1">
-      <Pressable onPress={() => router.back()} accessibilityRole="button" className="w-16 py-2">
+      <Pressable onPress={() => goBack()} accessibilityRole="button" className="w-16 py-2">
         <Text className="text-base text-neutral-600 dark:text-neutral-400">‹ Back</Text>
       </Pressable>
       <Text className="flex-1 text-center text-lg font-semibold text-neutral-900 dark:text-white" numberOfLines={1}>

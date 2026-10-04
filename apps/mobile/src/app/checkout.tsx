@@ -19,6 +19,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useSession } from "@/auth/auth-provider";
 import { useDatabase } from "@/db/database-provider";
 import { completeSale } from "@/db/sales-repo";
+import { goBack } from "@/lib/navigation";
 import { useCart } from "@/pos/cart-provider";
 import { useShift } from "@/pos/shift-provider";
 import { useSync } from "@/sync/sync-provider";
@@ -134,7 +135,7 @@ export default function CheckoutScreen() {
         </View>
         <View className="px-6 pb-8">
           <Pressable
-            onPress={() => router.back()}
+            onPress={() => goBack()}
             accessibilityRole="button"
             className="h-14 items-center justify-center rounded-2xl bg-neutral-900 active:opacity-90 dark:bg-white"
           >
@@ -148,7 +149,7 @@ export default function CheckoutScreen() {
   return (
     <SafeAreaView className="flex-1 bg-white dark:bg-neutral-950" edges={["top", "left", "right"]}>
       <View className="flex-row items-center px-4 pb-2 pt-1">
-        <Pressable onPress={() => router.back()} accessibilityRole="button" className="py-2 pr-4">
+        <Pressable onPress={() => goBack()} accessibilityRole="button" className="py-2 pr-4">
           <Text className="text-base text-neutral-600 dark:text-neutral-400">‹ Back</Text>
         </Pressable>
         <Text className="flex-1 text-center text-lg font-semibold text-neutral-900 dark:text-white">Checkout</Text>
