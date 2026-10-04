@@ -12,7 +12,8 @@
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx scripts/seed.ts",
-    "db:migrate:prod": "DB_TARGET=production drizzle-kit migrate"
+    "db:migrate:prod": "DB_TARGET=production drizzle-kit migrate",
+    "db:seed:demo": "tsx scripts/seed-demo-catalog.ts"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.3",
