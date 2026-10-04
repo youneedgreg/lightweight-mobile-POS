@@ -17,16 +17,34 @@ pnpm dev:web      # http://localhost:3000
 pnpm dev:mobile   # Expo dev server
 ```
 
+To preview the mobile app in a browser against the local API, use the `web` and `mobile-web` configurations in `.claude/launch.json`, or set `EXPO_PUBLIC_API_URL` in `apps/mobile/.env.local`.
+
 ## Database
 
 Schema lives in `apps/web/src/db/schema.ts`. Migrations are generated SQL files committed in `apps/web/drizzle/`.
 
+Local development uses the Neon **`dev` branch**. Production is only touched by `db:migrate:prod`.
+
 ```bash
-pnpm db:generate   # create a migration from schema changes
-pnpm db:migrate    # apply migrations to DATABASE_URL_UNPOOLED
-pnpm db:seed       # create the first admin from SEED_ADMIN_* env vars
-pnpm db:studio     # browse data
+pnpm db:generate      # create a migration from schema changes
+pnpm db:migrate       # apply migrations to the dev branch
+pnpm db:migrate:prod  # apply migrations to production (run before pushing code that needs them)
+pnpm db:seed          # create the first admin (and optional test cashier) from SEED_* env vars
+pnpm db:studio        # browse data
 ```
+
+## Authentication
+
+| Who | Where | How |
+| --- | --- | --- |
+| Owner (`ADMIN`) | Web dashboard `/admin` | Email + password via Auth.js (JWT session, 12 h) |
+| Cashier (`CASHIER`), or owner with a PIN | POS app | Phone + 4–6 digit PIN → `POST /api/mobile/auth/login` → bearer token (7 days), bound to the device |
+
+- API routes use `withAuth([...roles], handler)` from `src/lib/auth/guard.ts`, which accepts either the bearer token or the web session and re-checks the database on every request.
+- Pages and server actions use `requireAdmin()` from `src/lib/auth/dal.ts`. `src/proxy.ts` only does optimistic redirects.
+- 5 wrong passwords/PINs lock the account for 15 minutes. An owner PIN reset unlocks it.
+- Resetting a PIN or disabling a user bumps `token_version`, which signs that user out of every phone immediately. Disabling a device does the same for that phone.
+- Owners manage staff at `/admin/users`.
 
 ## Domain rules
 
