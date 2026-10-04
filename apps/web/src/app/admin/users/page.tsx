@@ -6,7 +6,7 @@ import { users } from "@/db/schema";
 import { requireAdmin } from "@/lib/auth/dal";
 
 import { setUserActive } from "./actions";
-import { CreateCashierForm, ResetPinForm } from "./forms";
+import { CreateCashierForm, PhoneForm, ResetPinForm } from "./forms";
 
 export const metadata: Metadata = { title: "Staff · Liquor POS" };
 
@@ -32,8 +32,8 @@ export default async function UsersPage() {
       <section className="flex flex-col gap-3">
         <h1 className="text-2xl font-semibold tracking-tight">Staff</h1>
         <p className="text-sm text-neutral-500">
-          Cashiers log in on the POS app with their phone number and PIN. Set a PIN on your own
-          account to use the app yourself.
+          Cashiers log in on the POS app with their phone number and PIN. To use the app yourself,
+          add your phone number and set a PIN on your own row.
         </p>
         <CreateCashierForm />
       </section>
@@ -57,7 +57,14 @@ export default async function UsersPage() {
                 <tr key={user.id} className="border-b border-neutral-100 align-top dark:border-neutral-900">
                   <td className="py-3 pr-4 font-medium">{user.name ?? "—"}</td>
                   <td className="py-3 pr-4 text-neutral-600 dark:text-neutral-400">
-                    {[user.phone, user.email].filter(Boolean).join(" · ")}
+                    {user.role === "ADMIN" ? (
+                      <div className="flex flex-col gap-1">
+                        <span>{user.email}</span>
+                        <PhoneForm userId={user.id} phone={user.phone} />
+                      </div>
+                    ) : (
+                      user.phone
+                    )}
                   </td>
                   <td className="py-3 pr-4">{user.role === "ADMIN" ? "Owner" : "Cashier"}</td>
                   <td className="py-3 pr-4">

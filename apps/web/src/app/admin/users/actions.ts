@@ -9,6 +9,7 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { requireAdmin } from "@/lib/auth/dal";
+import { isUniqueViolation } from "@/lib/forms";
 import { hashSecret } from "@/lib/auth/password";
 
 export interface FormState {
@@ -27,6 +28,11 @@ const resetPinSchema = z.object({
   pin: pinSchema,
 });
 
+const setPhoneSchema = z.object({
+  userId: z.string().min(1),
+  phone: phoneSchema,
+});
+
 const setActiveSchema = z.object({
   userId: z.string().min(1),
   active: z.enum(["true", "false"]).transform((value) => value === "true"),
@@ -34,10 +40,6 @@ const setActiveSchema = z.object({
 
 function firstIssue(error: z.ZodError): string {
   return error.issues[0]?.message ?? "Invalid input";
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "23505";
 }
 
 export async function createCashier(_previous: FormState, formData: FormData): Promise<FormState> {
@@ -95,6 +97,26 @@ export async function resetPin(_previous: FormState, formData: FormData): Promis
 
   revalidatePath("/admin/users");
   return { ok: true, message: "PIN updated. Any phones using the old PIN are signed out." };
+}
+
+/** Sets the phone number used to log in on the POS app (e.g. for the owner). */
+export async function setPhone(_previous: FormState, formData: FormData): Promise<FormState> {
+  const admin = await requireAdmin();
+  const parsed = setPhoneSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { ok: false, message: firstIssue(parsed.error) };
+  const { userId, phone } = parsed.data;
+
+  try {
+    await db.transaction(async (tx) => {
+      await tx.update(users).set({ phone }).where(eq(users.id, userId));
+      await audit({ userId: admin.id, action: "user.set_phone", entityType: "user", entityId: userId, data: { phone } }, tx);
+    });
+  } catch (error) {
+    if (isUniqueViolation(error)) return { ok: false, message: "That phone number is already in use." };
+    throw error;
+  }
+  revalidatePath("/admin/users");
+  return { ok: true, message: "Phone saved." };
 }
 
 /** Enables or disables a user. Disabling also revokes their mobile tokens. */

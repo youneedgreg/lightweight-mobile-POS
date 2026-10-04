@@ -3,7 +3,7 @@
 import { PIN_MAX_LENGTH, PIN_MIN_LENGTH } from "@liquor-pos/shared";
 import { useActionState } from "react";
 
-import { createCashier, resetPin, type FormState } from "./actions";
+import { createCashier, resetPin, setPhone, type FormState } from "./actions";
 
 const initialState: FormState = { ok: false, message: null };
 
@@ -71,6 +71,30 @@ export function ResetPinForm({ userId }: { userId: string }) {
         <input {...pinInputProps} placeholder="New PIN" aria-label="New PIN" className={`${inputClass} w-28 py-1 text-sm`} />
         <button type="submit" disabled={pending} className="rounded-md border border-neutral-300 px-3 py-1 text-sm dark:border-neutral-700">
           {pending ? "Saving…" : "Set PIN"}
+        </button>
+      </div>
+      <StatusMessage state={state} />
+    </form>
+  );
+}
+
+export function PhoneForm({ userId, phone }: { userId: string; phone: string | null }) {
+  const [state, formAction, pending] = useActionState(setPhone, initialState);
+  return (
+    <form action={formAction} className="flex flex-col gap-1">
+      <div className="flex gap-2">
+        <input type="hidden" name="userId" value={userId} />
+        <input
+          name="phone"
+          type="tel"
+          required
+          defaultValue={phone ? `0${phone.slice(4)}` : ""}
+          placeholder="Phone for POS login"
+          aria-label="Phone for POS login"
+          className={`${inputClass} w-40 py-1 text-sm`}
+        />
+        <button type="submit" disabled={pending} className="rounded-md border border-neutral-300 px-3 py-1 text-sm dark:border-neutral-700">
+          {pending ? "Saving…" : "Save"}
         </button>
       </div>
       <StatusMessage state={state} />
