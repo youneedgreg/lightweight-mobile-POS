@@ -33,8 +33,8 @@ const productSchema = z
     isReturnable: checkbox,
     depositAmount: wholeNumber("Deposit"),
     isActive: checkbox,
-    // Only used when creating a product.
     costPrice: optionalWholeNumber("Cost price"),
+    // Only used when creating a product.
     openingStock: optionalWholeNumber("Opening stock"),
   })
   .refine((p) => !p.isReturnable || p.depositAmount > 0, {
@@ -76,9 +76,14 @@ export async function saveProduct(_previous: FormState, formData: FormData): Pro
     if (input.id) {
       const before = await db.query.products.findFirst({ where: eq(products.id, input.id) });
       if (!before) return { ok: false, message: "Product not found." };
+      const costPrice = input.costPrice ?? before.costPrice;
       await db.transaction(async (tx) => {
-        await tx.update(products).set(values).where(eq(products.id, input.id as string));
-        if (before.retailPrice !== values.retailPrice || before.wholesalePrice !== values.wholesalePrice) {
+        await tx.update(products).set({ ...values, costPrice }).where(eq(products.id, input.id as string));
+        if (
+          before.retailPrice !== values.retailPrice ||
+          before.wholesalePrice !== values.wholesalePrice ||
+          before.costPrice !== costPrice
+        ) {
           await audit(
             {
               userId: admin.id,
@@ -88,6 +93,7 @@ export async function saveProduct(_previous: FormState, formData: FormData): Pro
               data: {
                 retail: [before.retailPrice, values.retailPrice],
                 wholesale: [before.wholesalePrice, values.wholesalePrice],
+                cost: [before.costPrice, costPrice],
               },
             },
             tx,

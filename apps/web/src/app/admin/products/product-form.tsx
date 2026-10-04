@@ -15,6 +15,7 @@ export interface ProductFormValues {
   categoryId: string | null;
   retailPrice: number;
   wholesalePrice: number | null;
+  costPrice: number;
   reorderLevel: number;
   isReturnable: boolean;
   depositAmount: number;
@@ -67,15 +68,13 @@ export function ProductForm({
         <Input name="wholesalePrice" inputMode="numeric" defaultValue={product?.wholesalePrice ?? ""} />
       </Field>
 
+      <Field label="Cost per bottle (KES)" hint="What the supplier charges. Every stock intake updates it; edit here when prices change.">
+        <Input name="costPrice" inputMode="numeric" defaultValue={product?.costPrice ?? ""} />
+      </Field>
       {isNew && (
-        <>
-          <Field label="Cost per bottle (KES)" hint="Updated automatically by every stock intake.">
-            <Input name="costPrice" inputMode="numeric" />
-          </Field>
-          <Field label="Opening stock (bottles)" hint="Bottles on the shelf right now.">
-            <Input name="openingStock" inputMode="numeric" />
-          </Field>
-        </>
+        <Field label="Opening stock (bottles)" hint="Bottles on the shelf right now.">
+          <Input name="openingStock" inputMode="numeric" />
+        </Field>
       )}
 
       <div className="flex flex-col gap-2 sm:col-span-2">
