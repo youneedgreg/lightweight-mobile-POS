@@ -44,16 +44,32 @@ pnpm db:studio        # browse data
 - Pages and server actions use `requireAdmin()` from `src/lib/auth/dal.ts`. `src/proxy.ts` only does optimistic redirects.
 - 5 wrong passwords/PINs lock the account for 15 minutes. An owner PIN reset unlocks it.
 - Resetting a PIN or disabling a user bumps `token_version`, which signs that user out of every phone immediately. Disabling a device does the same for that phone.
-- Owners manage staff at `/admin/users`.
+- Owners manage staff at `/admin/users`, including their own phone number and PIN for using the POS app.
+
+## Owner dashboard
+
+`/admin/products` (prices, packs, opening stock, bottle photos stored in Vercel Blob), `/admin/customers`, `/admin/suppliers` (balances and ledgers) and `/admin/users`. Photos can also be taken on the phone (Menu → Bottle photos). Both upload through `POST /api/admin/products/[id]/image`.
 
 ## Offline sync
 
 The POS app keeps a full copy of the catalog in SQLite (`apps/mobile/src/db`) and sells without a connection.
 
-- **Completing a sale** happens in one local transaction: the receipt number is allocated (`<device prefix>-<counter>`, e.g. `D1-000042`), the sale is saved to local history, a copy goes into the `sync_queue` outbox, and local stock goes down.
-- **Sync** (`apps/mobile/src/sync`) runs on login, when the network returns, when the app comes to the foreground, every 60 s, and after each sale. It **pushes** the outbox to `POST /api/mobile/sync` (customers first, then sales in batches of 50), then **pulls** catalog changes from `GET /api/mobile/catalog?since=<cursor>`.
-- **The server** (`apps/web/src/lib/sales/record-sale.ts`) stores each sale in one transaction: sale, items, payments, stock movements, cached stock, a credit ledger entry and an audit entry for price overrides. Re-sending a sale returns `duplicate`. A sale that can never be stored returns `rejected`; the phone keeps it and marks it "needs attention" for the owner.
-- A phone uploads sales on behalf of whichever cashier made them (`cashierId` in the sale), but only sales made on that same device.
+- **Everything the phone records** (sales, shifts, customer and supplier payments, expenses, empties returns, stock intakes, balance corrections) is applied locally and queued in the `sync_queue` outbox **in the same transaction**. Receipt numbers are `<device prefix>-<counter>`, e.g. `D1-000042`.
+- **Sync** (`apps/mobile/src/sync`) runs on login, when the network returns, when the app comes to the foreground, every 60 s, and after each change. It **pushes** the outbox to `POST /api/mobile/sync` in batches of 50, in dependency order (customers → shift opens → intakes → sales → money movements → shift closes; see `SYNC_KINDS` in `packages/shared/src/operations.ts`), then **pulls** catalog changes from `GET /api/mobile/catalog?since=<cursor>`.
+- **The server** (`apps/web/src/lib/sync/*`) stores each record in its own transaction. Re-sending returns `duplicate`. A record that can never be stored returns `rejected`; the phone keeps it under "Needs attention" on the Sales & sync screen.
+- Phones upload records on behalf of whoever made them (`cashierId`, `createdById` …), but only for their own device. Owner-only records (stock intake, supplier payments, balance corrections) must be made by an owner and are uploaded only while an owner is signed in.
+
+### Till and shifts
+
+A phone sells only during an open shift. Opening records the float. Every cash movement in the shift goes into a local `cash_movements` log: cash taken in sales (including deposits), cash debt repayments, cash expenses, cash paid to suppliers and deposit refunds. Closing compares the expected cash with the counted cash. The server recomputes the expected figure from the uploaded records (`apps/web/src/lib/sync/shifts.ts`).
+
+### Empties and deposits
+
+Returnable products have a deposit per bottle. At checkout, every bottle not exchanged for an empty pays the deposit, on top of the item total (`sale.deposit_total` is kept separate from revenue). Empties brought back later are refunded from the till. Everything is recorded in `empties_ledger_entry`.
+
+### Stock intake (case-breaking)
+
+The owner scans a bottle or a crate barcode. For a crate, the app asks to confirm breaking it into bottles (e.g. 2 crates × 24 = 48 bottles). The delivery sets each product's latest cost price, and whatever wasn't paid on delivery is added to the supplier's balance.
 
 For local testing, `pnpm db:seed:demo` loads a demo catalog into the **dev** branch. It refuses to run against production.
 
