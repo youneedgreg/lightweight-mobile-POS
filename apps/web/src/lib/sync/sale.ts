@@ -1,12 +1,14 @@
 import "server-only";
 
-import type { SaleInput, SyncItemResult } from "@liquor-pos/shared";
+import type { saleInputSchema, SyncItemResult } from "@liquor-pos/shared";
 import { eq, inArray, sql } from "drizzle-orm";
+import type { z } from "zod";
 
 import { db } from "@/db";
 import {
   customerLedger,
   customers,
+  emptiesLedger,
   payments,
   productUnits,
   products,
@@ -16,29 +18,21 @@ import {
 } from "@/db/schema";
 import { audit } from "@/lib/audit";
 
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+import { created, duplicate, guarded, rejected, type Tx, type Uploader } from "./common";
 
-function pgErrorCode(error: unknown): string | null {
-  if (typeof error !== "object" || error === null) return null;
-  if ("code" in error && typeof error.code === "string") return error.code;
-  // Drizzle wraps driver errors; the Postgres error is the cause.
-  if ("cause" in error) return pgErrorCode(error.cause);
-  return null;
-}
-
-const rejected = (id: string, message: string): SyncItemResult => ({ id, status: "rejected", message });
+type Sale = z.output<typeof saleInputSchema>;
 
 /**
  * Stores one sale uploaded from a phone, atomically and idempotently:
- * sale, items, payments, stock movements, cached stock and the customer
- * ledger for credit — or nothing at all.
+ * sale, items, payments, stock movements, cached stock, the customer ledger
+ * for credit and the empties ledger for returnable bottles — or nothing.
  *
  * Prices come from the phone (it priced the sale offline, possibly with a
  * cashier discount); stock quantities and cost snapshots are computed here.
  * Stock may go negative; that is flagged on the dashboard, never rejected.
  */
-export async function recordSale(sale: SaleInput, uploaderDeviceId: string): Promise<SyncItemResult> {
-  if (sale.deviceId !== uploaderDeviceId) {
+export async function recordSale(sale: Sale, uploader: Uploader): Promise<SyncItemResult> {
+  if (sale.deviceId !== uploader.deviceId) {
     return rejected(sale.id, "Sale was made on a different device.");
   }
 
@@ -46,7 +40,10 @@ export async function recordSale(sale: SaleInput, uploaderDeviceId: string): Pro
   const unitIds = [...new Set(sale.items.flatMap((item) => (item.productUnitId ? [item.productUnitId] : [])))];
 
   const [productRows, unitRows] = await Promise.all([
-    db.select({ id: products.id, costPrice: products.costPrice }).from(products).where(inArray(products.id, productIds)),
+    db
+      .select({ id: products.id, costPrice: products.costPrice, isReturnable: products.isReturnable })
+      .from(products)
+      .where(inArray(products.id, productIds)),
     unitIds.length > 0
       ? db
           .select({ id: productUnits.id, productId: productUnits.productId, unitsPerPack: productUnits.unitsPerPack })
@@ -57,7 +54,7 @@ export async function recordSale(sale: SaleInput, uploaderDeviceId: string): Pro
   const productById = new Map(productRows.map((row) => [row.id, row]));
   const unitById = new Map(unitRows.map((row) => [row.id, row]));
 
-  const lines: Array<SaleInput["items"][number] & { baseQuantity: number; unitCost: number }> = [];
+  const lines: Array<Sale["items"][number] & { baseQuantity: number; unitCost: number }> = [];
   for (const item of sale.items) {
     const product = productById.get(item.productId);
     if (!product) return rejected(sale.id, `Unknown product ${item.productId}.`);
@@ -72,18 +69,28 @@ export async function recordSale(sale: SaleInput, uploaderDeviceId: string): Pro
     lines.push({ ...item, baseQuantity: item.quantity * unitsPerPack, unitCost: product.costPrice });
   }
 
-  const subtotal = lines.reduce((sum, line) => sum + line.listUnitPrice * line.quantity, 0);
-  const total = lines.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0);
-  const costTotal = lines.reduce((sum, line) => sum + line.unitCost * line.baseQuantity, 0);
-  const occurredAt = new Date(sale.occurredAt);
-
   const bottlesByProduct = new Map<string, number>();
   for (const line of lines) {
     bottlesByProduct.set(line.productId, (bottlesByProduct.get(line.productId) ?? 0) + line.baseQuantity);
   }
 
-  try {
-    return await db.transaction(async (tx: Tx): Promise<SyncItemResult> => {
+  for (const empties of sale.empties) {
+    if (!productById.get(empties.productId)?.isReturnable) {
+      return rejected(sale.id, "Empties were recorded for a product that isn't returnable.");
+    }
+    if (empties.returned > (bottlesByProduct.get(empties.productId) ?? 0)) {
+      return rejected(sale.id, "More empties returned than bottles sold.");
+    }
+  }
+
+  const subtotal = lines.reduce((sum, line) => sum + line.listUnitPrice * line.quantity, 0);
+  const total = lines.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0);
+  const costTotal = lines.reduce((sum, line) => sum + line.unitCost * line.baseQuantity, 0);
+  const depositTotal = sale.empties.reduce((sum, e) => sum + e.depositCharged, 0);
+  const occurredAt = new Date(sale.occurredAt);
+
+  return guarded(sale.id, () =>
+    db.transaction(async (tx: Tx): Promise<SyncItemResult> => {
       const inserted = await tx
         .insert(sales)
         .values({
@@ -98,6 +105,7 @@ export async function recordSale(sale: SaleInput, uploaderDeviceId: string): Pro
           discountTotal: subtotal - total,
           total,
           costTotal,
+          depositTotal,
           occurredAt,
         })
         .onConflictDoNothing()
@@ -107,7 +115,7 @@ export async function recordSale(sale: SaleInput, uploaderDeviceId: string): Pro
         // Either this exact sale was uploaded before, or the receipt number clashes with another sale.
         const existing = await tx.query.sales.findFirst({ where: eq(sales.id, sale.id), columns: { id: true } });
         return existing
-          ? { id: sale.id, status: "duplicate", message: null }
+          ? duplicate(sale.id)
           : rejected(sale.id, `Receipt number ${sale.receiptNo} is already used by another sale.`);
       }
 
@@ -159,6 +167,28 @@ export async function recordSale(sale: SaleInput, uploaderDeviceId: string): Pro
           .where(eq(products.id, productId));
       }
 
+      const emptiesRows = sale.empties.flatMap((e) => [
+        ...(e.returned > 0
+          ? [{ type: "RETURNED_BY_CUSTOMER" as const, productId: e.productId, quantity: e.returned, deposit: 0 }]
+          : []),
+        ...(e.depositCharged > 0
+          ? [{ type: "DEPOSIT_COLLECTED" as const, productId: e.productId, quantity: 0, deposit: e.depositCharged }]
+          : []),
+      ]);
+      if (emptiesRows.length > 0) {
+        await tx.insert(emptiesLedger).values(
+          emptiesRows.map((row) => ({
+            ...row,
+            id: crypto.randomUUID(),
+            customerId: sale.customerId,
+            saleId: sale.id,
+            shiftId: sale.shiftId,
+            createdById: sale.cashierId,
+            occurredAt,
+          })),
+        );
+      }
+
       const credit = sale.payments.filter((payment) => payment.method === "CREDIT");
       if (credit.length > 0 && sale.customerId) {
         await tx.insert(customerLedger).values(
@@ -201,15 +231,7 @@ export async function recordSale(sale: SaleInput, uploaderDeviceId: string): Pro
         );
       }
 
-      return { id: sale.id, status: "created", message: null };
-    });
-  } catch (error) {
-    if (pgErrorCode(error) === "23503") {
-      return rejected(sale.id, "Sale refers to a cashier, customer or shift the server doesn't know.");
-    }
-    if (pgErrorCode(error) === "23505") {
-      return rejected(sale.id, "A line or payment id in this sale is already used by another sale.");
-    }
-    throw error;
-  }
+      return created(sale.id);
+    }),
+  );
 }

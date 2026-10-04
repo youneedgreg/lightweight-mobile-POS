@@ -3,7 +3,7 @@ import { eq, gte, sql, type SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 
 import { db } from "@/db";
-import { categories, customerLedger, customers, productUnits, products } from "@/db/schema";
+import { categories, customerLedger, customers, productUnits, products, supplierLedger, suppliers } from "@/db/schema";
 import { ANY_ROLE, withAuth } from "@/lib/auth/guard";
 import { apiError } from "@/lib/http";
 
@@ -15,11 +15,11 @@ import { apiError } from "@/lib/http";
 const CURSOR_OVERLAP_MS = 60_000;
 
 /**
- * Catalog pull for phones: products, packs, categories and customers changed
+ * Catalog pull for phones: products, packs, categories, customers and suppliers changed
  * since `?since=<cursor>` (or everything when omitted). Inactive rows are
  * included so phones can hide them.
  */
-export const GET = withAuth(ANY_ROLE, async (request) => {
+export const GET = withAuth(ANY_ROLE, async (request, _context, principal) => {
   const sinceParam = new URL(request.url).searchParams.get("since");
   let since: Date | null = null;
   if (sinceParam) {
@@ -42,7 +42,16 @@ export const GET = withAuth(ANY_ROLE, async (request) => {
     .groupBy(customerLedger.customerId)
     .as("balance");
 
-  const [productRows, unitRows, categoryRows, customerRows] = await Promise.all([
+  const supplierBalance = db
+    .select({
+      supplierId: supplierLedger.supplierId,
+      balance: sql<number>`coalesce(sum(${supplierLedger.amount}), 0)::int`.as("supplier_balance"),
+    })
+    .from(supplierLedger)
+    .groupBy(supplierLedger.supplierId)
+    .as("supplier_balance");
+
+  const [productRows, unitRows, categoryRows, customerRows, supplierRows] = await Promise.all([
     db.select().from(products).where(changedSince(products.updatedAt)),
     db.select().from(productUnits).where(changedSince(productUnits.updatedAt)),
     db.select().from(categories).where(changedSince(categories.updatedAt)),
@@ -51,7 +60,13 @@ export const GET = withAuth(ANY_ROLE, async (request) => {
       .from(customers)
       .leftJoin(balance, eq(balance.customerId, customers.id))
       .where(changedSince(customers.updatedAt)),
+    db
+      .select({ supplier: suppliers, balance: sql<number>`coalesce(${supplierBalance.balance}, 0)` })
+      .from(suppliers)
+      .leftJoin(supplierBalance, eq(supplierBalance.supplierId, suppliers.id))
+      .where(changedSince(suppliers.updatedAt)),
   ]);
+  const isOwner = principal.role === "ADMIN";
 
   const body: CatalogResponse = {
     cursor,
@@ -63,6 +78,8 @@ export const GET = withAuth(ANY_ROLE, async (request) => {
       categoryId: p.categoryId,
       retailPrice: p.retailPrice,
       wholesalePrice: p.wholesalePrice,
+      // Cost prices are only for the owner's eyes.
+      costPrice: isOwner ? p.costPrice : null,
       stockOnHand: p.stockOnHand,
       isReturnable: p.isReturnable,
       depositAmount: p.depositAmount,
@@ -97,6 +114,14 @@ export const GET = withAuth(ANY_ROLE, async (request) => {
       balance: Number(owed),
       isActive: c.isActive,
       updatedAt: c.updatedAt.toISOString(),
+    })),
+    suppliers: supplierRows.map(({ supplier: s, balance: owed }) => ({
+      id: s.id,
+      name: s.name,
+      phone: s.phone,
+      balance: Number(owed),
+      isActive: s.isActive,
+      updatedAt: s.updatedAt.toISOString(),
     })),
   };
   return Response.json(body);
