@@ -5,7 +5,7 @@ Offline-first point of sale and back office for a single liquor store with sever
 | Path | What | Stack |
 | --- | --- | --- |
 | `apps/web` | API + admin command center | Next.js 16 (App Router), Drizzle ORM, Neon Postgres, Vercel Blob |
-| `apps/mobile` | Cashier POS app | Expo SDK 57, Expo Router, NativeWind 4, expo-sqlite (Phase 3) |
+| `apps/mobile` | Cashier POS app (Android) | Expo SDK 57, Expo Router, NativeWind 4, expo-sqlite, EAS Build |
 | `packages/shared` | Enums, money helpers, Zod wire schemas used by both apps | TypeScript, Zod 4 |
 
 ## Getting started
@@ -18,6 +18,19 @@ pnpm dev:mobile   # Expo dev server
 ```
 
 To preview the mobile app in a browser against the local API, use the `web` and `mobile-web` configurations in `.claude/launch.json`, or set `EXPO_PUBLIC_API_URL` in `apps/mobile/.env.local`.
+
+## Building the Android app
+
+The POS app is built in the cloud with EAS (project `@youneedgreg/liquor-pos-mobile`). Run these from `apps/mobile`:
+
+```bash
+npx eas-cli@latest build -p android --profile preview      # installable APK for staff phones
+npx eas-cli@latest build -p android --profile production   # Play Store bundle (version code auto-increments)
+```
+
+Profiles are in `apps/mobile/eas.json`, and all of them point at the production API. The signing keystore is managed by EAS. **Don't delete it**, or installed phones can't take updates. To install a preview build, open the build page on expo.dev on the phone and download the APK. Android asks to allow installs from the browser the first time.
+
+Barcode scanners: pair a Bluetooth (or USB-OTG) scanner with the phone as a keyboard (HID mode). The selling and stock intake screens capture its codes without opening the on-screen keyboard (`src/components/hardware-scanner.tsx`).
 
 ## Database
 
