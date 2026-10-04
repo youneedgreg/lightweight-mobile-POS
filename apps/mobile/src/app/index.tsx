@@ -161,7 +161,7 @@ export default function PosScreen() {
       </View>
 
       {categories.length > 0 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} className="grow-0" contentContainerClassName="items-center gap-2 px-4 pb-2">
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} className="shrink-0 grow-0" contentContainerClassName="items-center gap-2 px-4 pb-2 pt-1">
           {[{ id: null, name: "All" }, ...categories].map((category) => {
             const selected = category.id === categoryId;
             return (
