@@ -14,12 +14,15 @@ export default async function AdminLayout({ children }: LayoutProps<"/admin">) {
   return (
     <div className="flex flex-1 flex-col">
       <header className="border-b border-neutral-200 dark:border-neutral-800">
-        <div className="mx-auto flex max-w-5xl items-center gap-6 px-4 py-3">
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
           <Link href="/admin" className="font-semibold">
             Liquor POS
           </Link>
-          <nav className="flex gap-4 text-sm text-neutral-600 dark:text-neutral-400">
+          <nav className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-neutral-600 dark:text-neutral-400">
             <Link href="/admin">Dashboard</Link>
+            <Link href="/admin/products">Products</Link>
+            <Link href="/admin/customers">Customers</Link>
+            <Link href="/admin/suppliers">Suppliers</Link>
             <Link href="/admin/users">Staff</Link>
           </nav>
           <div className="ml-auto flex items-center gap-3 text-sm">
