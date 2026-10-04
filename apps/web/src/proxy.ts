@@ -13,7 +13,7 @@ export default auth((request) => {
 
   if (pathname.startsWith("/admin") && !isAdmin) {
     const loginUrl = new URL("/login", request.nextUrl);
-    loginUrl.searchParams.set("callbackUrl", pathname);
+    loginUrl.searchParams.set("callbackUrl", pathname + request.nextUrl.search);
     return NextResponse.redirect(loginUrl);
   }
   if (pathname === "/login" && isAdmin) {
