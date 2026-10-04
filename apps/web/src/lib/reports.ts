@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq, gte, isNull, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lt, ne, or, sql } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 
 import { db } from "@/db";
@@ -262,7 +262,7 @@ export async function staleDevices(maxAgeMs: number) {
   return db
     .select({ id: devices.id, label: devices.label, receiptPrefix: devices.receiptPrefix, lastSyncedAt: devices.lastSyncedAt })
     .from(devices)
-    .where(and(eq(devices.isActive, true), sql`${devices.lastSyncedAt} is null or ${devices.lastSyncedAt} < ${olderThan}`));
+    .where(and(eq(devices.isActive, true), or(isNull(devices.lastSyncedAt), lt(devices.lastSyncedAt, olderThan))));
 }
 
 export async function expenseList(range: DateRange) {
