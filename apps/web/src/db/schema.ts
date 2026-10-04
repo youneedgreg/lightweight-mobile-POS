@@ -291,6 +291,7 @@ export const shifts = pgTable(
     openingFloat: kes("opening_float").notNull(),
     openedAt: timestamp("opened_at", { withTimezone: true, mode: "date" }).notNull(),
     closedAt: timestamp("closed_at", { withTimezone: true, mode: "date" }),
+    closedById: text("closed_by_id").references(() => users.id),
     /** Float + cash sales + cash debt repayments − cash expenses − deposit refunds. Computed on close. */
     expectedCash: kes("expected_cash"),
     countedCash: kes("counted_cash"),
@@ -328,6 +329,8 @@ export const sales = pgTable(
     total: kes("total").notNull(),
     /** Sum of item cost snapshots, for profit reports. */
     costTotal: kes("cost_total").notNull().default(0),
+    /** Bottle deposits charged on top of `total` (not revenue; refundable). Payments = total + depositTotal. */
+    depositTotal: kes("deposit_total").notNull().default(0),
     voidedAt: timestamp("voided_at", { withTimezone: true, mode: "date" }),
     voidedById: text("voided_by_id").references(() => users.id),
     voidReason: text("void_reason"),
@@ -423,6 +426,7 @@ export const stockIntakes = pgTable(
     totalCost: kes("total_cost").notNull(),
     /** Paid on delivery. totalCost − amountPaid goes to the supplier ledger. */
     amountPaid: kes("amount_paid").notNull().default(0),
+    shiftId: uuid("shift_id").references(() => shifts.id),
     notes: text("notes"),
     occurredAt: occurredAt(),
     createdAt: createdAt(),
@@ -519,6 +523,8 @@ export const supplierLedger = pgTable(
     amount: kes("amount").notNull(),
     intakeId: uuid("intake_id").references(() => stockIntakes.id),
     method: paymentMethod("method"),
+    /** Set when paid in cash from a till, so the shift's expected cash accounts for it. */
+    shiftId: uuid("shift_id").references(() => shifts.id),
     reference: text("reference"),
     note: text("note"),
     createdById: text("created_by_id")
