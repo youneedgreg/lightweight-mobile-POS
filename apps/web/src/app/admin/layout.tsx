@@ -20,9 +20,13 @@ export default async function AdminLayout({ children }: LayoutProps<"/admin">) {
           </Link>
           <nav className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-neutral-600 dark:text-neutral-400">
             <Link href="/admin">Dashboard</Link>
+            <Link href="/admin/sales">Sales</Link>
+            <Link href="/admin/stock">Stock</Link>
             <Link href="/admin/products">Products</Link>
             <Link href="/admin/customers">Customers</Link>
             <Link href="/admin/suppliers">Suppliers</Link>
+            <Link href="/admin/shifts">Shifts</Link>
+            <Link href="/admin/expenses">Expenses</Link>
             <Link href="/admin/users">Staff</Link>
           </nav>
           <div className="ml-auto flex items-center gap-3 text-sm">
