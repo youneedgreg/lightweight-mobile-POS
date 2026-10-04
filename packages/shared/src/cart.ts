@@ -13,6 +13,8 @@ export interface PricedProduct {
   size: string | null;
   retailPrice: Kes;
   wholesalePrice: Kes | null;
+  /** Deposit per returnable bottle; 0 or absent when the bottle isn't returnable. */
+  depositAmount?: Kes;
 }
 
 /** A pack of a product (e.g. "Crate of 24"). */
@@ -35,6 +37,8 @@ export interface CartLine {
   unitsPerPack: number;
   listUnitPrice: Kes;
   unitPrice: Kes;
+  /** Deposit per bottle when the bottle is returnable, else 0. */
+  depositPerBottle: Kes;
 }
 
 export interface Cart {
@@ -88,6 +92,7 @@ export function addItem(
     unitsPerPack: unit?.unitsPerPack ?? 1,
     listUnitPrice: price,
     unitPrice: price,
+    depositPerBottle: product.depositAmount ?? 0,
   };
   return { ...cart, lines: [...cart.lines, line] };
 }
@@ -169,6 +174,57 @@ export function baseQuantities(cart: Cart): Map<string, number> {
     result.set(line.productId, (result.get(line.productId) ?? 0) + line.quantity * line.unitsPerPack);
   }
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Empties and deposits
+// ---------------------------------------------------------------------------
+
+export interface ReturnableLine {
+  productId: string;
+  name: string;
+  /** Bottles leaving the shop, across single bottles and packs. */
+  bottles: number;
+  depositPerBottle: Kes;
+}
+
+/** Returnable products in the cart, one entry per product. */
+export function returnableLines(cart: Cart): ReturnableLine[] {
+  const byProduct = new Map<string, ReturnableLine>();
+  for (const line of cart.lines) {
+    if (line.depositPerBottle <= 0) continue;
+    const bottles = line.quantity * line.unitsPerPack;
+    const existing = byProduct.get(line.productId);
+    if (existing) {
+      existing.bottles += bottles;
+    } else {
+      // Use the product name without a pack suffix.
+      byProduct.set(line.productId, {
+        productId: line.productId,
+        name: line.name.replace(/ \([^)]*\)$/, ""),
+        bottles,
+        depositPerBottle: line.depositPerBottle,
+      });
+    }
+  }
+  return [...byProduct.values()];
+}
+
+export interface EmptiesDue {
+  productId: string;
+  returned: number;
+  depositCharged: Kes;
+}
+
+/**
+ * Deposit owed per returnable product: every bottle not exchanged for an
+ * empty pays the deposit. Returned counts are clamped to 0..bottles.
+ */
+export function depositsDue(lines: readonly ReturnableLine[], returned: ReadonlyMap<string, number>): EmptiesDue[] {
+  return lines.map((line) => {
+    const given = Math.min(line.bottles, Math.max(0, Math.trunc(returned.get(line.productId) ?? 0)));
+    return { productId: line.productId, returned: given, depositCharged: (line.bottles - given) * line.depositPerBottle };
+  });
 }
 
 // ---------------------------------------------------------------------------

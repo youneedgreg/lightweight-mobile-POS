@@ -17,6 +17,8 @@ export const catalogProductSchema = z.object({
   categoryId: z.uuid().nullable(),
   retailPrice: kes,
   wholesalePrice: kes.nullable(),
+  /** Latest cost per bottle. Only sent to owners; null for cashiers. */
+  costPrice: kes.nullable(),
   stockOnHand: z.number().int(),
   isReturnable: z.boolean(),
   depositAmount: kes,
@@ -61,6 +63,17 @@ export const catalogCustomerSchema = z.object({
 });
 export type CatalogCustomer = z.infer<typeof catalogCustomerSchema>;
 
+export const catalogSupplierSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  phone: z.string().nullable(),
+  /** Amount the shop owes this supplier right now (SUM of the supplier ledger). */
+  balance: kes,
+  isActive: z.boolean(),
+  updatedAt: z.iso.datetime({ offset: true }),
+});
+export type CatalogSupplier = z.infer<typeof catalogSupplierSchema>;
+
 export const catalogResponseSchema = z.object({
   /** Pass back as `since` on the next pull. */
   cursor: z.iso.datetime({ offset: true }),
@@ -68,5 +81,6 @@ export const catalogResponseSchema = z.object({
   units: z.array(catalogUnitSchema),
   categories: z.array(catalogCategorySchema),
   customers: z.array(catalogCustomerSchema),
+  suppliers: z.array(catalogSupplierSchema),
 });
 export type CatalogResponse = z.infer<typeof catalogResponseSchema>;

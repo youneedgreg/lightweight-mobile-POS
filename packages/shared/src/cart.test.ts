@@ -6,9 +6,11 @@ import {
   cartTotals,
   changeDue,
   checkPayments,
+  depositsDue,
   emptyCart,
   productPrice,
   removeLine,
+  returnableLines,
   setPriceTier,
   setQuantity,
   setUnitPrice,
@@ -165,5 +167,32 @@ describe("payments", () => {
   it("computes change and never returns negative change", () => {
     expect(changeDue(1000, 850)).toBe(150);
     expect(changeDue(500, 850)).toBe(0);
+  });
+});
+
+describe("empties and deposits", () => {
+  const returnableTusker = { ...tusker, depositAmount: 20 };
+
+  it("counts returnable bottles across singles and crates", () => {
+    let cart = addItem(emptyCart(), returnableTusker, null, 3);
+    cart = addItem(cart, returnableTusker, crate);
+    cart = addItem(cart, vodka);
+    expect(returnableLines(cart)).toEqual([
+      { productId: "p-tusker", name: "Tusker 500ml", bottles: 28, depositPerBottle: 20 },
+    ]);
+  });
+
+  it("charges a deposit for every bottle not exchanged", () => {
+    const lines = returnableLines(addItem(emptyCart(), returnableTusker, crate));
+    expect(depositsDue(lines, new Map([["p-tusker", 20]]))).toEqual([
+      { productId: "p-tusker", returned: 20, depositCharged: 5 * 20 },
+    ]);
+    expect(depositsDue(lines, new Map())).toEqual([{ productId: "p-tusker", returned: 0, depositCharged: 25 * 20 }]);
+  });
+
+  it("clamps returned empties to the bottles sold", () => {
+    const lines = returnableLines(addItem(emptyCart(), returnableTusker, null, 2));
+    expect(depositsDue(lines, new Map([["p-tusker", 9]]))[0]).toMatchObject({ returned: 2, depositCharged: 0 });
+    expect(depositsDue(lines, new Map([["p-tusker", -3]]))[0]).toMatchObject({ returned: 0, depositCharged: 40 });
   });
 });
