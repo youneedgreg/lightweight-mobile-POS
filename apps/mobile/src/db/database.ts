@@ -104,6 +104,49 @@ const MIGRATIONS: readonly string[] = [
     value TEXT NOT NULL
   );
   `,
+  // v2: suppliers, cost prices, till cash log, and an outbox for every kind of record.
+  `
+  ALTER TABLE products ADD COLUMN cost_price INTEGER;
+
+  CREATE TABLE suppliers (
+    id TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL,
+    phone TEXT,
+    balance INTEGER NOT NULL DEFAULT 0,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL
+  );
+
+  -- Every movement of cash in or out of the drawer during a shift (positive = in).
+  CREATE TABLE cash_movements (
+    id TEXT PRIMARY KEY NOT NULL,
+    shift_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    description TEXT,
+    occurred_at TEXT NOT NULL
+  );
+  CREATE INDEX cash_movements_shift_idx ON cash_movements (shift_id);
+
+  -- Rebuild the outbox: any record kind, uploaded in priority order.
+  CREATE TABLE sync_queue_v2 (
+    id TEXT PRIMARY KEY NOT NULL,
+    kind TEXT NOT NULL,
+    priority INTEGER NOT NULL,
+    payload TEXT NOT NULL,
+    summary TEXT,
+    created_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'rejected')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT
+  );
+  INSERT INTO sync_queue_v2 (id, kind, priority, payload, created_at, status, attempts, last_error)
+    SELECT id, kind, CASE kind WHEN 'customer' THEN 0 ELSE 3 END, payload, created_at, status, attempts, last_error
+    FROM sync_queue;
+  DROP TABLE sync_queue;
+  ALTER TABLE sync_queue_v2 RENAME TO sync_queue;
+  CREATE INDEX sync_queue_order_idx ON sync_queue (status, priority, created_at);
+  `,
 ];
 
 async function migrate(db: Database): Promise<void> {

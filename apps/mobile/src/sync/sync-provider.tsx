@@ -22,9 +22,9 @@ const SYNC_INTERVAL_MS = 60_000;
 
 export interface SyncStatus {
   syncing: boolean;
-  /** Sales waiting to upload. */
+  /** Records (sales, payments, expenses…) waiting to upload. */
   pending: number;
-  /** Sales the server refused; need the owner's attention. */
+  /** Records the server refused; need the owner's attention. */
   rejected: number;
   lastSyncedAt: string | null;
   /** Last failure, e.g. "No connection to the server." Cleared on success. */
@@ -53,6 +53,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const db = useDatabase();
   const { state, signOut } = useAuth();
   const token = state.status === "signedIn" ? state.session.token : null;
+  const role = state.status === "signedIn" ? state.session.user.role : null;
 
   const [status, setStatus] = useState<SyncStatus>({
     syncing: false,
@@ -70,13 +71,13 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   }, [db]);
 
   const syncNow = useCallback(async () => {
-    if (!token) return;
+    if (!token || !role) return;
     if (running.current) return running.current;
 
     const task = (async () => {
       setStatus((s) => ({ ...s, syncing: true }));
       try {
-        await runSync(db, token);
+        await runSync(db, token, role);
         setStatus((s) => ({ ...s, lastError: null, catalogVersion: s.catalogVersion + 1 }));
       } catch (error) {
         if (error instanceof ApiRequestError && error.isAuthFailure) {
@@ -94,7 +95,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     })();
     running.current = task;
     return task;
-  }, [db, token, signOut, refreshCounts]);
+  }, [db, token, role, signOut, refreshCounts]);
 
   const retry = useCallback(async () => {
     await retryRejected(db);

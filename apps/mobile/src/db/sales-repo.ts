@@ -3,12 +3,15 @@ import {
   cartTotals,
   type Cart,
   type DraftPayment,
+  type EmptiesDue,
   type PaymentMethod,
   type SaleInput,
 } from "@liquor-pos/shared";
 import * as Crypto from "expo-crypto";
 
 import { getMeta, inTransaction, setMeta, type Database } from "./database";
+import { enqueue } from "./outbox";
+import { getCurrentShift, recordCash } from "./shift-repo";
 
 const RECEIPT_COUNTER_KEY = "receipt_counter";
 
@@ -47,21 +50,24 @@ export interface CompleteSaleInput {
   payments: readonly DraftPayment[];
   cashier: { id: string; name: string | null };
   customer: { id: string; name: string } | null;
+  /** Returnable bottles: empties handed over and deposits charged (paid on top of the cart total). */
+  empties: readonly EmptiesDue[];
   deviceId: string;
   receiptPrefix: string;
 }
 
 /**
  * Records a completed sale on the phone. In one transaction it allocates the
- * next receipt number, saves the sale to local history, queues it for upload
- * and lowers local stock. Works fully offline.
+ * next receipt number, saves the sale to local history, queues it for upload,
+ * lowers local stock and logs the cash taken in the open shift. Works fully offline.
  */
 export async function completeSale(db: Database, input: CompleteSaleInput): Promise<SaleInput> {
-  const { cart, payments, cashier, customer, deviceId, receiptPrefix } = input;
+  const { cart, payments, cashier, customer, empties, deviceId, receiptPrefix } = input;
   const totals = cartTotals(cart);
   const occurredAt = new Date().toISOString();
 
   return inTransaction(db, async (tx) => {
+    const shift = await getCurrentShift(tx);
     const counter = Number((await getMeta(tx, RECEIPT_COUNTER_KEY)) ?? "0") + 1;
     await setMeta(tx, RECEIPT_COUNTER_KEY, String(counter));
     const receiptNo = `${receiptPrefix}-${String(counter).padStart(6, "0")}`;
@@ -71,7 +77,7 @@ export async function completeSale(db: Database, input: CompleteSaleInput): Prom
       receiptNo,
       deviceId,
       cashierId: cashier.id,
-      shiftId: null,
+      shiftId: shift?.id ?? null,
       customerId: customer?.id ?? null,
       priceTier: cart.priceTier,
       items: cart.lines.map((line) => ({
@@ -88,6 +94,7 @@ export async function completeSale(db: Database, input: CompleteSaleInput): Prom
         amount: payment.amount,
         reference: payment.reference?.trim() || null,
       })),
+      empties: empties.filter((e) => e.returned > 0 || e.depositCharged > 0),
       occurredAt,
     };
 
@@ -96,13 +103,10 @@ export async function completeSale(db: Database, input: CompleteSaleInput): Prom
          item_count, total, discount, payment_methods, occurred_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [sale.id, receiptNo, cashier.id, cashier.name, customer?.id ?? null, customer?.name ?? null, cart.priceTier,
-        totals.itemCount, totals.total, totals.discount,
+        totals.itemCount, totals.total + empties.reduce((sum, e) => sum + e.depositCharged, 0), totals.discount,
         JSON.stringify([...new Set(payments.map((p) => p.method))]), occurredAt],
     );
-    await tx.runAsync(
-      "INSERT INTO sync_queue (id, kind, payload, created_at) VALUES (?, 'sale', ?, ?)",
-      [sale.id, JSON.stringify(sale), occurredAt],
-    );
+    await enqueue(tx, "sale", sale, `Sale ${receiptNo}`);
     for (const [productId, bottles] of baseQuantities(cart)) {
       await tx.runAsync("UPDATE products SET stock_on_hand = stock_on_hand - ? WHERE id = ?", [bottles, productId]);
     }
@@ -110,6 +114,8 @@ export async function completeSale(db: Database, input: CompleteSaleInput): Prom
     if (credit > 0 && customer) {
       await tx.runAsync("UPDATE customers SET balance = balance + ? WHERE id = ?", [credit, customer.id]);
     }
+    const cash = payments.filter((p) => p.method === "CASH").reduce((sum, p) => sum + p.amount, 0);
+    await recordCash(tx, shift?.id ?? null, "SALE", cash, receiptNo);
     return sale;
   });
 }

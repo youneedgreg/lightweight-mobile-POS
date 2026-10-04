@@ -8,11 +8,16 @@ import type {
 import * as Crypto from "expo-crypto";
 
 import { inTransaction, type Database, type Executor } from "./database";
+import { enqueue } from "./outbox";
 
 export interface Product extends PricedProduct {
   barcode: string | null;
   categoryId: string | null;
   stockOnHand: number;
+  /** Latest cost per bottle; only known on phones an owner has synced. */
+  costPrice: number | null;
+  isReturnable: boolean;
+  depositAmount: number;
   imageUrl: string | null;
   units: Unit[];
 }
@@ -25,6 +30,14 @@ export interface Unit extends PricedUnit {
 export interface Category {
   id: string;
   name: string;
+}
+
+export interface Supplier {
+  id: string;
+  name: string;
+  phone: string | null;
+  /** What the shop owes them. */
+  balance: number;
 }
 
 export interface Customer {
@@ -46,6 +59,9 @@ interface ProductRow {
   retail_price: number;
   wholesale_price: number | null;
   stock_on_hand: number;
+  cost_price: number | null;
+  is_returnable: number;
+  deposit_amount: number;
   image_url: string | null;
 }
 
@@ -109,6 +125,9 @@ async function withUnits(db: Executor, rows: ProductRow[]): Promise<Product[]> {
     retailPrice: row.retail_price,
     wholesalePrice: row.wholesale_price,
     stockOnHand: row.stock_on_hand,
+    costPrice: row.cost_price,
+    isReturnable: row.is_returnable === 1,
+    depositAmount: row.deposit_amount,
     imageUrl: row.image_url,
     units: unitsByProduct.get(row.id) ?? [],
   }));
@@ -119,16 +138,17 @@ export async function applyCatalog(db: Database, catalog: CatalogResponse): Prom
   await inTransaction(db, async (tx) => {
     for (const p of catalog.products) {
       await tx.runAsync(
-        `INSERT INTO products (id, name, size, barcode, category_id, retail_price, wholesale_price, stock_on_hand,
-           is_returnable, deposit_amount, image_url, is_active, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO products (id, name, size, barcode, category_id, retail_price, wholesale_price, cost_price,
+           stock_on_hand, is_returnable, deposit_amount, image_url, is_active, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET
            name = excluded.name, size = excluded.size, barcode = excluded.barcode, category_id = excluded.category_id,
            retail_price = excluded.retail_price, wholesale_price = excluded.wholesale_price,
+           cost_price = COALESCE(excluded.cost_price, products.cost_price),
            stock_on_hand = excluded.stock_on_hand, is_returnable = excluded.is_returnable,
            deposit_amount = excluded.deposit_amount, image_url = excluded.image_url,
            is_active = excluded.is_active, updated_at = excluded.updated_at`,
-        [p.id, p.name, p.size, p.barcode, p.categoryId, p.retailPrice, p.wholesalePrice, p.stockOnHand,
+        [p.id, p.name, p.size, p.barcode, p.categoryId, p.retailPrice, p.wholesalePrice, p.costPrice, p.stockOnHand,
           p.isReturnable ? 1 : 0, p.depositAmount, p.imageUrl, p.isActive ? 1 : 0, p.updatedAt],
       );
     }
@@ -159,6 +179,14 @@ export async function applyCatalog(db: Database, catalog: CatalogResponse): Prom
            credit_limit = excluded.credit_limit, balance = excluded.balance, is_active = excluded.is_active,
            updated_at = excluded.updated_at`,
         [c.id, c.name, c.phone, c.type, c.priceTier, c.creditLimit, c.balance, c.isActive ? 1 : 0, c.updatedAt],
+      );
+    }
+    for (const s of catalog.suppliers) {
+      await tx.runAsync(
+        `INSERT INTO suppliers (id, name, phone, balance, is_active, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET name = excluded.name, phone = excluded.phone, balance = excluded.balance,
+           is_active = excluded.is_active, updated_at = excluded.updated_at`,
+        [s.id, s.name, s.phone, s.balance, s.isActive ? 1 : 0, s.updatedAt],
       );
     }
   });
@@ -272,10 +300,45 @@ export async function createCustomer(
        VALUES (?, ?, ?, 'CUSTOMER', 'RETAIL', NULL, 0, 1, ?)`,
       [customer.id, customer.name, customer.phone, now],
     );
-    await tx.runAsync(
-      "INSERT INTO sync_queue (id, kind, payload, created_at) VALUES (?, 'customer', ?, ?)",
-      [customer.id, JSON.stringify({ id: customer.id, name: customer.name, phone: customer.phone }), now],
-    );
+    await enqueue(tx, "customer", { id: customer.id, name: customer.name, phone: customer.phone }, `New customer ${customer.name}`);
   });
   return customer;
+}
+
+/** Active products whose bottles carry a deposit, for the empties screen. */
+export async function listReturnableProducts(db: Database): Promise<Product[]> {
+  const rows = await db.getAllAsync<ProductRow>(
+    "SELECT * FROM products WHERE is_active = 1 AND is_returnable = 1 ORDER BY name COLLATE NOCASE, size",
+  );
+  return withUnits(db, rows);
+}
+
+/** Customers who owe money, largest debt first (or matching a search). */
+export async function listDebtors(db: Database, query = ""): Promise<Customer[]> {
+  const term = query.trim();
+  const rows = await db.getAllAsync<CustomerRow>(
+    `SELECT * FROM customers
+     WHERE is_active = 1 AND (balance <> 0 OR ? <> '')
+       AND (? = '' OR name LIKE '%' || ? || '%' COLLATE NOCASE OR phone LIKE '%' || ? || '%')
+     ORDER BY balance DESC, name COLLATE NOCASE LIMIT 200`,
+    [term, term, term, term],
+  );
+  return rows.map(toCustomer);
+}
+
+interface SupplierRow {
+  id: string;
+  name: string;
+  phone: string | null;
+  balance: number;
+}
+
+export async function listSuppliers(db: Database): Promise<Supplier[]> {
+  return db.getAllAsync<SupplierRow>(
+    "SELECT id, name, phone, balance FROM suppliers WHERE is_active = 1 ORDER BY balance DESC, name COLLATE NOCASE",
+  );
+}
+
+export async function getSupplier(db: Database, id: string): Promise<Supplier | null> {
+  return db.getFirstAsync<SupplierRow>("SELECT id, name, phone, balance FROM suppliers WHERE id = ?", id);
 }
