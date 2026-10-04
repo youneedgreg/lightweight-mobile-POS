@@ -1,5 +1,5 @@
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from "expo-camera";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -7,12 +7,19 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { findByBarcode } from "@/db/catalog-repo";
 import { useDatabase } from "@/db/database-provider";
 import { useCart } from "@/pos/cart-provider";
+import { emitScan } from "@/pos/scan-bus";
 
 /** The camera reports the same code many times a second; ignore repeats for this long. */
 const SAME_CODE_COOLDOWN_MS = 1500;
 
-/** Continuous camera scanning: every recognised barcode goes straight into the cart. */
+/**
+ * Camera scanning. By default every recognised barcode goes straight into the
+ * cart (continuous). With ?target=intake it hands one barcode to the stock
+ * intake screen and closes.
+ */
 export default function ScanScreen() {
+  const { target } = useLocalSearchParams<{ target?: string }>();
+  const toIntake = target === "intake";
   const db = useDatabase();
   const { add, cart } = useCart();
   const [permission, requestPermission] = useCameraPermissions();
@@ -27,6 +34,11 @@ export default function ScanScreen() {
       if (last.current && last.current.code === data && now - last.current.at < SAME_CODE_COOLDOWN_MS) return;
       last.current = { code: data, at: now };
       busy.current = true;
+      if (toIntake) {
+        if (emitScan(data)) router.back();
+        busy.current = false;
+        return;
+      }
       try {
         const match = await findByBarcode(db, data);
         if (match) {
@@ -39,7 +51,7 @@ export default function ScanScreen() {
         busy.current = false;
       }
     },
-    [db, add],
+    [db, add, toIntake],
   );
 
   if (!permission) return <View className="flex-1 bg-black" />;
@@ -73,7 +85,9 @@ export default function ScanScreen() {
       <SafeAreaView className="absolute inset-0 justify-between" pointerEvents="box-none">
         <View className="items-center px-6 pt-4">
           <View className="h-40 w-full max-w-sm rounded-2xl border-2 border-white/80" />
-          <Text className="mt-3 text-center text-sm text-white">Point at a barcode. Keep scanning — items add automatically.</Text>
+          <Text className="mt-3 text-center text-sm text-white">
+            {toIntake ? "Point at a bottle or crate barcode." : "Point at a barcode. Keep scanning — items add automatically."}
+          </Text>
         </View>
         <View className="gap-3 px-6 pb-8">
           {message && (
@@ -82,7 +96,7 @@ export default function ScanScreen() {
             </View>
           )}
           <Pressable onPress={() => router.back()} accessibilityRole="button" className="h-14 items-center justify-center rounded-2xl bg-white">
-            <Text className="text-lg font-semibold text-neutral-900">Done · {items} in cart</Text>
+            <Text className="text-lg font-semibold text-neutral-900">{toIntake ? "Cancel" : `Done · ${items} in cart`}</Text>
           </Pressable>
         </View>
       </SafeAreaView>

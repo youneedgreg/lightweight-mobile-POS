@@ -1,4 +1,5 @@
 import { formatKes, productPrice, unitPrice, type PriceTier } from "@liquor-pos/shared";
+import { Image } from "expo-image";
 import { memo } from "react";
 import { Pressable, Text, View } from "react-native";
 
@@ -24,6 +25,10 @@ export const ProductRow = memo(function ProductRow({ product, tier, inCart, onAd
         accessibilityLabel={`Add ${product.name} ${product.size ?? ""}`}
         className={`flex-row items-center gap-3 px-4 pt-3 active:bg-neutral-100 dark:active:bg-neutral-900 ${product.units.length > 0 ? "pb-2" : "pb-3"}`}
       >
+        {product.imageUrl ? (
+          // Cached on disk by expo-image, so photos keep showing offline once seen.
+          <Image source={{ uri: product.imageUrl }} style={{ width: 36, height: 48 }} contentFit="contain" cachePolicy="disk" />
+        ) : null}
         <View className="flex-1 gap-1">
           <Text className="text-base font-semibold text-neutral-900 dark:text-white" numberOfLines={1}>
             {product.name}

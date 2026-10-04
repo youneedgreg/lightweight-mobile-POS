@@ -1,10 +1,10 @@
 import { cartTotals, formatKes } from "@liquor-pos/shared";
-import { Link, router } from "expo-router";
+import { router } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { useAuth, useSession } from "@/auth/auth-provider";
+import { useSession } from "@/auth/auth-provider";
 import { ProductRow } from "@/components/product-row";
 import { SyncBadge } from "@/components/sync-badge";
 import {
@@ -18,12 +18,13 @@ import {
 } from "@/db/catalog-repo";
 import { useDatabase } from "@/db/database-provider";
 import { useCart } from "@/pos/cart-provider";
+import { useShift } from "@/pos/shift-provider";
 import { useSync } from "@/sync/sync-provider";
 
 export default function PosScreen() {
   const db = useDatabase();
-  const { signOut } = useAuth();
   const { user } = useSession();
+  const { shift } = useShift();
   const { status } = useSync();
   const { cart, add } = useCart();
 
@@ -104,19 +105,24 @@ export default function PosScreen() {
           Hi, {firstName}
         </Text>
         <SyncBadge />
-        <Link href="/sales" asChild>
-          <Pressable accessibilityRole="button" className="rounded-full px-3 py-1.5 active:bg-neutral-100 dark:active:bg-neutral-900">
-            <Text className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Sales</Text>
-          </Pressable>
-        </Link>
         <Pressable
-          onPress={() => void signOut()}
+          onPress={() => router.push("/menu")}
           accessibilityRole="button"
-          className="rounded-full px-3 py-1.5 active:bg-neutral-100 dark:active:bg-neutral-900"
+          className="rounded-full bg-neutral-100 px-3 py-1.5 active:bg-neutral-200 dark:bg-neutral-800 dark:active:bg-neutral-700"
         >
-          <Text className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Log out</Text>
+          <Text className="text-sm font-medium text-neutral-800 dark:text-neutral-200">Menu</Text>
         </Pressable>
       </View>
+
+      {shift === null && (
+        <Pressable
+          onPress={() => router.push("/shift")}
+          accessibilityRole="button"
+          className="mx-4 mb-2 rounded-xl bg-amber-100 px-4 py-3 active:opacity-80 dark:bg-amber-950"
+        >
+          <Text className="text-sm font-semibold text-amber-900 dark:text-amber-100">No shift open — tap to open one with your float</Text>
+        </Pressable>
+      )}
 
       <View className="flex-row gap-2 px-4 pb-2">
         <TextInput

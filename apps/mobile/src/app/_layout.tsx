@@ -8,15 +8,20 @@ import { useEffect, type ReactNode } from "react";
 import { AuthProvider, useAuth } from "@/auth/auth-provider";
 import { DatabaseProvider } from "@/db/database-provider";
 import { CartProvider } from "@/pos/cart-provider";
+import { ShiftProvider } from "@/pos/shift-provider";
 import { SyncProvider } from "@/sync/sync-provider";
 
 void SplashScreen.preventAutoHideAsync();
 
-/** A fresh, empty cart for every user who signs in on this phone. */
-function PerUserCart({ children }: { children: ReactNode }) {
+/** A fresh cart for every user who signs in; the till shift belongs to the phone and survives logout. */
+function SignedInProviders({ children }: { children: ReactNode }) {
   const { state } = useAuth();
-  const userId = state.status === "signedIn" ? state.session.user.id : "signed-out";
-  return <CartProvider key={userId}>{children}</CartProvider>;
+  if (state.status !== "signedIn") return <>{children}</>;
+  return (
+    <ShiftProvider>
+      <CartProvider key={state.session.user.id}>{children}</CartProvider>
+    </ShiftProvider>
+  );
 }
 
 function RootNavigator() {
@@ -30,6 +35,7 @@ function RootNavigator() {
   if (state.status === "loading") return null;
 
   const signedIn = state.status === "signedIn";
+  const isOwner = signedIn && state.session.user.role === "ADMIN";
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Protected guard={signedIn}>
@@ -38,6 +44,18 @@ function RootNavigator() {
         <Stack.Screen name="customers" options={{ presentation: "modal" }} />
         <Stack.Screen name="scan" options={{ presentation: "fullScreenModal", animation: "fade" }} />
         <Stack.Screen name="sales" />
+        <Stack.Screen name="menu" />
+        <Stack.Screen name="shift" />
+        <Stack.Screen name="debts" />
+        <Stack.Screen name="debt/[id]" />
+        <Stack.Screen name="expenses" />
+        <Stack.Screen name="empties" />
+        <Stack.Protected guard={isOwner}>
+          <Stack.Screen name="intake" />
+          <Stack.Screen name="suppliers" />
+          <Stack.Screen name="supplier/[id]" />
+          <Stack.Screen name="product-photo" />
+        </Stack.Protected>
       </Stack.Protected>
       <Stack.Protected guard={!signedIn}>
         <Stack.Screen name="login" />
@@ -51,10 +69,10 @@ export default function RootLayout() {
     <DatabaseProvider>
       <AuthProvider>
         <SyncProvider>
-          <PerUserCart>
+          <SignedInProviders>
             <StatusBar style="auto" />
             <RootNavigator />
-          </PerUserCart>
+          </SignedInProviders>
         </SyncProvider>
       </AuthProvider>
     </DatabaseProvider>

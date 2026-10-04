@@ -2,9 +2,11 @@ import {
   cartTotals,
   changeDue,
   checkPayments,
+  depositsDue,
   formatKes,
   PAYMENT_METHODS,
   PRICE_TIERS,
+  returnableLines,
   type DraftPayment,
   type PaymentMethod,
 } from "@liquor-pos/shared";
@@ -18,6 +20,7 @@ import { useSession } from "@/auth/auth-provider";
 import { useDatabase } from "@/db/database-provider";
 import { completeSale } from "@/db/sales-repo";
 import { useCart } from "@/pos/cart-provider";
+import { useShift } from "@/pos/shift-provider";
 import { useSync } from "@/sync/sync-provider";
 
 const METHOD_LABEL: Record<PaymentMethod, string> = { CASH: "Cash", MPESA: "M-Pesa", CREDIT: "Credit" };
@@ -42,6 +45,9 @@ export default function CheckoutScreen() {
   const session = useSession();
   const { refreshCounts, syncNow } = useSync();
   const { cart, customer, setQuantity, setPrice, remove, changeTier, chooseCustomer, clear } = useCart();
+  const { shift } = useShift();
+  /** Empty bottles handed over at the counter, per returnable product. */
+  const [returned, setReturned] = useState<Record<string, number>>({});
 
   const [payments, setPayments] = useState<PaymentRow[]>([]);
   const [editingPrice, setEditingPrice] = useState<{ key: string; text: string } | null>(null);
@@ -50,12 +56,17 @@ export default function CheckoutScreen() {
   const [completed, setCompleted] = useState<{ receiptNo: string; total: number; change: number } | null>(null);
 
   const totals = cartTotals(cart);
+  const returnables = returnableLines(cart);
+  const empties = depositsDue(returnables, new Map(Object.entries(returned)));
+  const depositTotal = empties.reduce((sum, e) => sum + e.depositCharged, 0);
+  /** What the customer pays: items plus deposits for bottles they keep. */
+  const amountDue = totals.total + depositTotal;
   const drafts: DraftPayment[] = payments.map((row) => ({
     method: row.method,
     amount: toKes(row.amount),
     reference: row.reference.trim() || null,
   }));
-  const check = checkPayments(totals.total, drafts, customer !== null);
+  const check = checkPayments(amountDue, drafts, customer !== null);
   const cashChange = payments
     .filter((row) => row.method === "CASH" && row.tendered.trim() !== "")
     .reduce((sum, row) => sum + changeDue(toKes(row.tendered) || 0, toKes(row.amount) || 0), 0);
@@ -64,7 +75,7 @@ export default function CheckoutScreen() {
     customer?.creditLimit != null && creditAmount > 0 && customer.balance + creditAmount > customer.creditLimit;
 
   function addPayment(method: PaymentMethod) {
-    const remaining = Math.max(0, totals.total - drafts.reduce((sum, d) => sum + (d.amount || 0), 0));
+    const remaining = Math.max(0, amountDue - drafts.reduce((sum, d) => sum + (d.amount || 0), 0));
     setPayments((rows) => [
       ...rows,
       { key: Crypto.randomUUID(), method, amount: remaining > 0 ? String(remaining) : "", reference: "", tendered: "" },
@@ -83,7 +94,7 @@ export default function CheckoutScreen() {
   }
 
   async function complete() {
-    if (check.errors.length > 0 || submitting) return;
+    if (check.errors.length > 0 || submitting || !shift) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -92,11 +103,13 @@ export default function CheckoutScreen() {
         payments: drafts,
         cashier: { id: session.user.id, name: session.user.name },
         customer: customer ? { id: customer.id, name: customer.name } : null,
+        empties,
         deviceId: session.device.id,
         receiptPrefix: session.device.receiptPrefix,
       });
-      setCompleted({ receiptNo: sale.receiptNo, total: totals.total, change: cashChange });
+      setCompleted({ receiptNo: sale.receiptNo, total: amountDue, change: cashChange });
       clear();
+      setReturned({});
       await refreshCounts();
       void syncNow();
     } catch (caught) {
@@ -260,11 +273,57 @@ export default function CheckoutScreen() {
                 </View>
               </>
             )}
+            {depositTotal > 0 && (
+              <View className="flex-row justify-between">
+                <Text className="text-neutral-500">Bottle deposits (refundable)</Text>
+                <Text className="text-neutral-500">{formatKes(depositTotal)}</Text>
+              </View>
+            )}
             <View className="flex-row justify-between">
               <Text className="text-xl font-bold text-neutral-900 dark:text-white">Total</Text>
-              <Text className="text-xl font-bold text-neutral-900 dark:text-white">{formatKes(totals.total)}</Text>
+              <Text className="text-xl font-bold text-neutral-900 dark:text-white">{formatKes(amountDue)}</Text>
             </View>
           </View>
+
+          {/* Empties: returnable bottles are exchanged for empties or carry a deposit */}
+          {returnables.length > 0 && (
+            <View className="gap-2">
+              <Text className="text-base font-semibold text-neutral-900 dark:text-white">Empties</Text>
+              {returnables.map((line) => {
+                const due = empties.find((e) => e.productId === line.productId);
+                const given = due?.returned ?? 0;
+                const set = (value: number) =>
+                  setReturned((current) => ({ ...current, [line.productId]: Math.min(line.bottles, Math.max(0, value)) }));
+                return (
+                  <View key={line.productId} className="gap-2 rounded-xl bg-neutral-50 p-3 dark:bg-neutral-900">
+                    <Text className="text-sm font-medium text-neutral-900 dark:text-white">
+                      {line.name} · {line.bottles} bottle{line.bottles === 1 ? "" : "s"}
+                    </Text>
+                    <View className="flex-row items-center gap-3">
+                      <Text className="text-sm text-neutral-600 dark:text-neutral-400">Empties brought</Text>
+                      <View className="flex-row items-center rounded-lg border border-neutral-300 dark:border-neutral-700">
+                        <Pressable onPress={() => set(given - 1)} accessibilityLabel="Fewer empties" className="px-4 py-2">
+                          <Text className="text-lg text-neutral-900 dark:text-white">−</Text>
+                        </Pressable>
+                        <Text className="min-w-8 text-center text-base font-semibold text-neutral-900 dark:text-white">{given}</Text>
+                        <Pressable onPress={() => set(given + 1)} accessibilityLabel="More empties" className="px-4 py-2">
+                          <Text className="text-lg text-neutral-900 dark:text-white">+</Text>
+                        </Pressable>
+                      </View>
+                      <Pressable onPress={() => set(line.bottles)} accessibilityRole="button">
+                        <Text className="text-sm text-neutral-600 underline dark:text-neutral-400">All</Text>
+                      </Pressable>
+                    </View>
+                    <Text className="text-xs text-neutral-500">
+                      {due && due.depositCharged > 0
+                        ? `Deposit ${formatKes(line.depositPerBottle)} × ${line.bottles - given} = ${formatKes(due.depositCharged)}`
+                        : "No deposit — all bottles exchanged"}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          )}
 
           {/* Payments */}
           <View className="gap-3">
@@ -347,14 +406,21 @@ export default function CheckoutScreen() {
             </Text>
           ))}
         {error && <Text className="text-sm text-red-600">{error}</Text>}
+        {shift === null && (
+          <Pressable onPress={() => router.push("/shift")} accessibilityRole="button" className="rounded-xl bg-amber-100 px-4 py-3 dark:bg-amber-950">
+            <Text className="text-center text-sm font-medium text-amber-900 dark:text-amber-100">
+              Open a shift before selling — tap here
+            </Text>
+          </Pressable>
+        )}
         <Pressable
           onPress={() => void complete()}
-          disabled={check.errors.length > 0 || submitting}
+          disabled={check.errors.length > 0 || submitting || !shift}
           accessibilityRole="button"
-          className={`h-14 items-center justify-center rounded-2xl ${check.errors.length === 0 && !submitting ? "bg-green-700 active:opacity-90" : "bg-neutral-300 dark:bg-neutral-700"}`}
+          className={`h-14 items-center justify-center rounded-2xl ${check.errors.length === 0 && !submitting && shift ? "bg-green-700 active:opacity-90" : "bg-neutral-300 dark:bg-neutral-700"}`}
         >
           <Text className="text-lg font-semibold text-white">
-            {submitting ? "Saving…" : `Complete sale · ${formatKes(totals.total)}`}
+            {submitting ? "Saving…" : `Complete sale · ${formatKes(amountDue)}`}
           </Text>
         </Pressable>
       </View>
