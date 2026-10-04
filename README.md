@@ -46,6 +46,17 @@ pnpm db:studio        # browse data
 - Resetting a PIN or disabling a user bumps `token_version`, which signs that user out of every phone immediately. Disabling a device does the same for that phone.
 - Owners manage staff at `/admin/users`.
 
+## Offline sync
+
+The POS app keeps a full copy of the catalog in SQLite (`apps/mobile/src/db`) and sells without a connection.
+
+- **Completing a sale** happens in one local transaction: the receipt number is allocated (`<device prefix>-<counter>`, e.g. `D1-000042`), the sale is saved to local history, a copy goes into the `sync_queue` outbox, and local stock goes down.
+- **Sync** (`apps/mobile/src/sync`) runs on login, when the network returns, when the app comes to the foreground, every 60 s, and after each sale. It **pushes** the outbox to `POST /api/mobile/sync` (customers first, then sales in batches of 50), then **pulls** catalog changes from `GET /api/mobile/catalog?since=<cursor>`.
+- **The server** (`apps/web/src/lib/sales/record-sale.ts`) stores each sale in one transaction: sale, items, payments, stock movements, cached stock, a credit ledger entry and an audit entry for price overrides. Re-sending a sale returns `duplicate`. A sale that can never be stored returns `rejected`; the phone keeps it and marks it "needs attention" for the owner.
+- A phone uploads sales on behalf of whichever cashier made them (`cashierId` in the sale), but only sales made on that same device.
+
+For local testing, `pnpm db:seed:demo` loads a demo catalog into the **dev** branch. It refuses to run against production.
+
 ## Domain rules
 
 - Money is whole Kenyan shillings stored as integers. Never use floats.
