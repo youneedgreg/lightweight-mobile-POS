@@ -98,6 +98,12 @@ export const users = pgTable(
     /** 4–6 digit PIN, used by cashiers on mobile. */
     pinHash: text("pin_hash"),
     isActive: boolean("is_active").notNull().default(true),
+    /** Consecutive failed logins (password or PIN). Reset on success. */
+    failedLoginAttempts: integer("failed_login_attempts").notNull().default(0),
+    /** Logins are refused until this time after too many failures. */
+    lockedUntil: timestamp("locked_until", { withTimezone: true, mode: "date" }),
+    /** Embedded in mobile tokens. Bumping it (PIN reset, deactivation) revokes every issued token. */
+    tokenVersion: integer("token_version").notNull().default(0),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
