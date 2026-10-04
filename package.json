@@ -15,6 +15,8 @@
     "db:migrate": "pnpm --filter web db:migrate",
     "db:studio": "pnpm --filter web db:studio",
     "db:seed": "pnpm --filter web db:seed",
-    "db:migrate:prod": "pnpm --filter web db:migrate:prod"
+    "db:migrate:prod": "pnpm --filter web db:migrate:prod",
+    "test": "pnpm -r test",
+    "db:seed:demo": "pnpm --filter web db:seed:demo"
   }
 }
