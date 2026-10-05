@@ -1,13 +1,19 @@
 /**
- * Fills the DEV database with a demo catalog (products, crates, customers and
- * opening stock) for testing the POS. Idempotent. Refuses to run against production.
- * Usage: pnpm db:seed:demo
+ * Fills a database with a demo catalog (products, crates, customers, a supplier,
+ * opening stock) and two demo logins for showing the POS. Idempotent.
+ *
+ *   pnpm db:seed:demo        dev branch
+ *   pnpm db:seed:demo:prod   production — only with ALLOW_PRODUCTION_DEMO=yes,
+ *                            for a demonstration that `pnpm db:wipe-demo:prod` removes later
+ *
+ * Demo logins come from DEMO_OWNER_PHONE/PIN and DEMO_CASHIER_PHONE/PIN when set.
  */
 import { config } from "dotenv";
 
 config({ path: ".env.local" });
 
 import { neonConfig, Pool } from "@neondatabase/serverless";
+import bcrypt from "bcryptjs";
 import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-serverless";
 import ws from "ws";
@@ -46,6 +52,10 @@ const PRODUCTS: DemoProduct[] = [
   { name: "Dasani Water", size: "500ml", category: "Soft drinks", barcode: "2000000000158", retail: 60, wholesale: null, cost: 35, stock: 3 },
 ];
 
+export const DEMO_SUPPLIER = { name: "KBL Distributors Nairobi", phone: "+254711999888", notes: "Demo supplier" };
+export const DEMO_OWNER_NAME = "Demo Owner";
+export const DEMO_CASHIER_NAME = "Mary Wanjiku";
+
 const CUSTOMERS = [
   { name: "Mama Njeri", phone: "+254711000111", priceTier: "RETAIL" as const, type: "CUSTOMER" as const },
   { name: "Club 41 Lounge", phone: "+254722000222", priceTier: "WHOLESALE" as const, type: "CUSTOMER" as const, creditLimit: 50000 },
@@ -54,12 +64,18 @@ const CUSTOMERS = [
 
 async function main() {
   const env = process.env;
-  if (!env.DATABASE_URL) throw new Error("DATABASE_URL must be set");
-  if (env.DB_TARGET === "production" || host(env.DATABASE_URL) === host(env.PROD_DATABASE_URL_UNPOOLED)) {
-    throw new Error("Refusing to seed demo data into the production database.");
+  const production = env.DB_TARGET === "production";
+  const url = production ? env.PROD_DATABASE_URL_UNPOOLED : env.DATABASE_URL;
+  if (!url) throw new Error(production ? "PROD_DATABASE_URL_UNPOOLED must be set" : "DATABASE_URL must be set");
+  if (production && env.ALLOW_PRODUCTION_DEMO !== "yes") {
+    throw new Error("Seeding production needs ALLOW_PRODUCTION_DEMO=yes (it adds demo data you must wipe later).");
   }
+  if (!production && host(url) === host(env.PROD_DATABASE_URL_UNPOOLED)) {
+    throw new Error("DATABASE_URL points at production; use DB_TARGET=production deliberately.");
+  }
+  console.log(`Seeding demo catalog into ${production ? "PRODUCTION" : "dev"} (${host(url)})`);
 
-  const pool = new Pool({ connectionString: env.DATABASE_URL });
+  const pool = new Pool({ connectionString: url });
   const db = drizzle({ client: pool, schema });
 
   const admin = await db.query.users.findFirst({ where: eq(schema.users.role, "ADMIN") });
@@ -121,6 +137,29 @@ async function main() {
     for (const c of CUSTOMERS) {
       const exists = await tx.query.customers.findFirst({ where: eq(schema.customers.phone, c.phone) });
       if (!exists) await tx.insert(schema.customers).values(c);
+    }
+
+    if (!(await tx.query.suppliers.findFirst({ where: eq(schema.suppliers.name, DEMO_SUPPLIER.name) }))) {
+      await tx.insert(schema.suppliers).values(DEMO_SUPPLIER);
+    }
+
+    // Demo logins: a separate owner (so the real owner account stays clean) and a cashier.
+    const logins = [
+      { name: DEMO_OWNER_NAME, role: "ADMIN" as const, phone: env.DEMO_OWNER_PHONE, pin: env.DEMO_OWNER_PIN },
+      { name: DEMO_CASHIER_NAME, role: "CASHIER" as const, phone: env.DEMO_CASHIER_PHONE, pin: env.DEMO_CASHIER_PIN },
+    ];
+    for (const login of logins) {
+      if (!login.phone || !login.pin) continue;
+      const pinHash = await bcrypt.hash(login.pin, 12);
+      const existing = await tx.query.users.findFirst({ where: eq(schema.users.phone, login.phone) });
+      if (existing) {
+        await tx
+          .update(schema.users)
+          .set({ name: login.name, role: login.role, pinHash, isActive: true, failedLoginAttempts: 0, lockedUntil: null })
+          .where(eq(schema.users.id, existing.id));
+      } else {
+        await tx.insert(schema.users).values({ name: login.name, role: login.role, phone: login.phone, pinHash });
+      }
     }
   });
 

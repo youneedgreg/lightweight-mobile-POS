@@ -13,7 +13,11 @@
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx scripts/seed.ts",
     "db:migrate:prod": "DB_TARGET=production drizzle-kit migrate",
-    "db:seed:demo": "tsx scripts/seed-demo-catalog.ts"
+    "db:seed:demo": "tsx scripts/seed-demo-catalog.ts",
+    "db:seed:demo:prod": "DB_TARGET=production tsx scripts/seed-demo-catalog.ts",
+    "demo:activity": "tsx scripts/demo-activity.ts",
+    "db:wipe-demo": "tsx scripts/wipe-demo.ts",
+    "db:wipe-demo:prod": "DB_TARGET=production tsx scripts/wipe-demo.ts"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.3",
@@ -40,6 +44,7 @@
     "drizzle-kit": "^0.31.11",
     "eslint": "^9",
     "eslint-config-next": "16.3.8",
+    "sharp": "^0.35.5",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
     "typescript": "^5",
